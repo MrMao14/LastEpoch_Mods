@@ -5,7 +5,7 @@ using MelonLoader;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
-[assembly: MelonInfo(typeof(LastEpoch_CosmeticUnlock.Main), "LastEpoch_CosmeticUnlock", "1.0.0", "RCInet")]
+[assembly: MelonInfo(typeof(LastEpoch_CosmeticUnlock.Main), "LastEpoch_CosmeticUnlock", "1.0.1", "RCInet")]
 [assembly: MelonGame("Eleventh Hour Games", "Last Epoch")]
 
 namespace LastEpoch_CosmeticUnlock
@@ -15,6 +15,11 @@ namespace LastEpoch_CosmeticUnlock
         private static readonly string[] MenuScenes = { "ClientSplash", "PersistentUI", "Login", "CharacterSelectScene" };
         private string currentScene = "";
         private bool menuProcessed;
+
+        public override void OnInitializeMelon()
+        {
+            CosmeticSaveRepair.QuarantineInvalidSave();
+        }
 
         public override void OnUpdate()
         {
@@ -57,6 +62,73 @@ namespace LastEpoch_CosmeticUnlock
             }
 
             return null;
+        }
+    }
+
+    internal static class CosmeticSaveRepair
+    {
+        private const string FallbackFileName = "offline_cosmetic_data_equips.json";
+        private static readonly object sync = new object();
+
+        public static void QuarantineInvalidSave()
+        {
+            lock (sync)
+            {
+                string fileName = FallbackFileName;
+                try
+                {
+                    string gameFileName = OfflineUserInventory.OfflineEquipsCosmeticsFileName;
+                    if (!string.IsNullOrWhiteSpace(gameFileName)) { fileName = gameFileName; }
+                }
+                catch (System.Exception exception)
+                {
+                    MelonLogger.Warning($"Could not resolve the equipped cosmetics file name: {exception.Message}");
+                }
+
+                string path = System.IO.Path.Combine(Application.persistentDataPath, fileName);
+                if (!System.IO.File.Exists(path)) { return; }
+
+                long length;
+                try { length = new System.IO.FileInfo(path).Length; }
+                catch (System.Exception exception)
+                {
+                    MelonLogger.Warning($"Could not inspect the equipped cosmetics save: {exception.Message}");
+                    return;
+                }
+
+                if (length > 0) { return; }
+
+                string backupPath = $"{path}.corrupt-{System.DateTime.Now:yyyyMMdd-HHmmss-fff}.bak";
+                try
+                {
+                    System.IO.File.Move(path, backupPath);
+                    MelonLogger.Warning($"Moved invalid equipped cosmetics save to '{backupPath}'.");
+                }
+                catch (System.Exception exception)
+                {
+                    MelonLogger.Error($"Could not repair the equipped cosmetics save: {exception.Message}");
+                }
+            }
+        }
+    }
+
+    [HarmonyPatch(typeof(OfflineUserInventory), "LoadEquips")]
+    internal static class OfflineUserInventory_LoadEquips
+    {
+        [HarmonyPrefix]
+        private static void Prefix()
+        {
+            CosmeticSaveRepair.QuarantineInvalidSave();
+        }
+    }
+
+    [HarmonyPatch(typeof(OfflineUserInventory), "OfflineLoadAndUpdateEquips")]
+    internal static class OfflineUserInventory_OfflineLoadAndUpdateEquips
+    {
+        [HarmonyPrefix]
+        private static void Prefix()
+        {
+            CosmeticSaveRepair.QuarantineInvalidSave();
         }
     }
 

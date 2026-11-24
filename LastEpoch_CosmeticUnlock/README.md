@@ -7,8 +7,9 @@
 - 解锁游戏已加载的全部 Cosmetics。
 - 通过 Harmony 拦截 `CosmeticsManager.GetOwnedCosmetics()`。
 - 隐藏游戏底部的 `Cosmetics` 入口，避免当前版本外观面板报错。
+- 检测并隔离 0 字节的 `offline_cosmetic_data_equips.json`，避免外观穿戴无法保存。
 
-> 该插件只修改客户端运行时的外观拥有列表，不修改存档或服务器账号数据。
+> 该插件只修改客户端运行时的外观拥有列表；不会修改服务器账号数据。检测到损坏的空外观存档时，会先将原文件备份到同目录，再让游戏重建。
 
 ## 构建环境
 
@@ -68,4 +69,5 @@ Last Epoch\
 
 - `LastEpochPath` 必须指向包含 `MelonLoader` 和游戏程序集的游戏根目录。
 - 如果游戏程序集路径发生变化，请同步修改 `LastEpoch_CosmeticUnlock.csproj` 中的 `HintPath`。
+- 如果外观穿戴仍无法保存，请检查 `%USERPROFILE%\AppData\LocalLow\Eleventh Hour Games\Last Epoch\Player.log` 是否仍有 `Error loading equipped cosmetics data`，并确认数据目录中不再出现 0 字节的 `offline_cosmetic_data_equips.json`。
 - 该功能面向离线/客户端环境，线上模式是否受服务器二次校验影响不在插件保障范围内。
