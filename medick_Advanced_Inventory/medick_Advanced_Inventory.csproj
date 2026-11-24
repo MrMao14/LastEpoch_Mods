@@ -1,0 +1,69 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>medick_Terrible_Inventory</AssemblyName>
+    <RootNamespace>medick_Terrible_Inventory</RootNamespace>
+    <Nullable>disable</Nullable>
+    <!-- Bump in lockstep with BuildInfo.Version (DLL file metadata) -->
+    <Version>2.0.3</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="docs\**\*.cs" />
+    <Reference Include="MelonLoader">
+      <HintPath>$(ML)MelonLoader.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(ML)0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2CppInterop.Runtime">
+      <HintPath>$(ML)Il2CppInterop.Runtime.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2CppLE">
+      <HintPath>$(GM)Il2CppLE.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(GM)UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>$(GM)UnityEngine.UI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Unity.TextMeshPro">
+      <HintPath>$(GM)Unity.TextMeshPro.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2Cppmscorlib">
+      <HintPath>$(GM)Il2Cppmscorlib.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Unity.Localization">
+      <HintPath>$(GM)Unity.Localization.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>$(GM)UnityEngine.TextRenderingModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Auto-copy built DLL to Last Epoch Mods folder after each build -->
+  <!-- Council A6: allow validation builds without touching the live Mods folder. -->
+  <Target Name="CopyToMods" AfterTargets="Build" Condition="'$(DeployToMods)' != 'false'">
+    <Copy SourceFiles="$(TargetPath)"
+          DestinationFolder="$(LastEpochPath)\Mods\" />
+  </Target>
+
+  <ItemGroup>
+    <Compile Include="..\tools\TerribleInteropRepair\CoreModuleRepair.cs" Link="Compatibility\CoreModuleRepair.cs" />
+    <Compile Include="..\tools\TerribleInteropRepair\EmbeddedRepairBootstrap.cs" Link="Compatibility\EmbeddedRepairBootstrap.cs" />
+    <Reference Include="Mono.Cecil"><HintPath>$(ML)Mono.Cecil.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

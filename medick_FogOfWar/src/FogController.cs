@@ -1,0 +1,385 @@
+using System;
+using System.Collections.Generic;
+using Il2Cpp;
+using Il2CppLE.UI.Minimap;
+using MelonLoader;
+using UnityEngine;
+
+namespace medick_FogOfWar
+{
+    // Owns everything written to the game's Minimap.
+    //
+    // v2 rule: EVERYTHING applies live — including BLIND's minimap hide,
+    // which in v1 required a full game restart in both directions. Every
+    // GameObject BLIND hides is remembered; leaving BLIND restores them all,
+    // and the restore is NEVER gated on a live minimap instance (leaving
+    // BLIND from a loading screen must still un-hide).
+    internal static class FogController
+    {
+        static Minimap _minimap;                            // current zone's instance
+        static readonly List<HiddenTarget> _hidden = new(); // everything BLIND hid
+
+        sealed class HiddenTarget
+        {
+            public GameObject GameObject;
+            public CanvasGroup CanvasGroup;
+            public bool AddedCanvasGroup;
+            public float Alpha;
+            public bool BlocksRaycasts;
+            public bool Interactable;
+        }
+
+        // EVERY radius written this session (capped): pooled minimap
+        // instances can alternate, so a single remembered value lets an old
+        // mod-written radius smuggle back in as a "zone default" and the
+        // LIMITED/SCOUT compounding bug returns through the side door.
+        static readonly List<float> _writtenRadii = new();
+        const int WrittenCap = 32;
+        static bool _restoring;   // ShowHidden in progress — the Update postfix must not react
+        static bool _shutdown;    // mod unloading — nothing may re-hide after RestoreDefaults
+        // council 2026-09-11 #5 — repeating failure-path warnings are session-latched.
+        static bool _protectedUiWarned;
+        static bool _applyFailedWarned;
+        // council 2026-09-11 #6 — a failed zone-default read must be visible once.
+        static bool _zoneDefaultWarned;
+
+        static bool WrittenBefore(float v)
+        {
+            for (int i = 0; i < _writtenRadii.Count; i++)
+                if (Math.Abs(_writtenRadii[i] - v) < 0.01f) return true;
+            return false;
+        }
+
+        // Captured fresh on every Minimap.Awake — zones can differ, and a
+        // global once-only latch goes stale (lesson from the sibling mods).
+        public static float ZoneDefaultRadius { get; private set; } = -1f;
+
+        // BLIND re-assert, called from the Minimap.Update postfix.
+        // Default capture stays Awake-only; this path never adopts values.
+        public static void OnMinimapUpdate(Minimap minimap)
+        {
+            // A minimap receiving Update while BLIND means the game re-activated
+            // a container this mod hid (overlay-map close, cutscene end, HUD
+            // refresh) — hide it again. Hosted on Update because the interop
+            // Minimap declares no OnEnable to hook (verified against
+            // Il2CppLE.dll). Under the CanvasGroup path the active minimap still
+            // receives Update every frame, so the postfix costs one enum compare
+            // plus the IsHidden scan; only the SetActive fallback silences Update.
+            // council 2026-09-11 #4
+            if (_shutdown || _restoring) return;
+            if (!FogLevels.HidesMinimap(Prefs.FogLevel.Value)) return;
+            if (minimap == null) return;
+            if (IsHidden(minimap)) return;
+            _minimap = minimap;
+            Apply();
+        }
+
+        public static void OnMinimapAwake(Minimap minimap)
+        {
+            if (minimap == null) return;
+            _minimap = minimap;
+            try
+            {
+                float pre = minimap.RevealRadius;
+                // SPEC rule 2 demands the PRE-WRITE value. Enforce it
+                // regardless of how the game invokes Awake: a value this mod
+                // wrote itself (pooled/cloned/re-awoken instances) is never
+                // adopted as a zone default — otherwise LIMITED/SCOUT would
+                // compound multiplicatively zone after zone.
+                if (pre > 0f
+                    && !WrittenBefore(pre)
+                    && Math.Abs(pre - ZoneDefaultRadius) > 0.01f)
+                {
+                    ZoneDefaultRadius = pre;
+                    Dbg.Log($"zone default RevealRadius captured: {pre:F0}");
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!_zoneDefaultWarned)
+                {
+                    _zoneDefaultWarned = true;
+                    MelonLogger.Warning($"zone default RevealRadius unreadable ({ex.Message}) — LIMITED/SCOUT scale off the 150 fallback until a game update restores it");
+                }
+            }
+            Apply();
+        }
+
+        // Idempotent; safe to call any time (settings click, zone load,
+        // login screen, loading screen).
+        public static void Apply()
+        {
+            var level = Prefs.FogLevel.Value;
+
+            // Restore needs only the remembered objects — never gate it on
+            // minimap aliveness, or leaving BLIND between zones strands the
+            // hidden minimap until restart (the v1 disease, reincarnated).
+            if (!FogLevels.HidesMinimap(level)) ShowHidden();
+
+            var m = _minimap;
+            bool alive;
+            try { alive = m != null; } catch { alive = false; }
+            if (!alive) return;
+
+            try
+            {
+                if (FogLevels.HidesMinimap(level)) Hide(m);
+                float radius = FogLevels.RadiusFor(level, ZoneDefaultRadius);
+                m.RevealRadius = radius;
+                // Record MODIFIED radii only: NORMAL writes the zone default
+                // back, and recording that would poison the capture guard
+                // against every genuine default we've ever visited (towns!) —
+                // the hunt fleet caught that regression before it shipped.
+                if (Math.Abs(radius - ZoneDefaultRadius) > 0.01f && !WrittenBefore(radius))
+                {
+                    if (_writtenRadii.Count >= WrittenCap) _writtenRadii.RemoveAt(0);
+                    _writtenRadii.Add(radius);
+                }
+                Dbg.Log($"applied {level} — RevealRadius {radius:F0}");
+            }
+            catch (Exception ex)
+            {
+                if (!_applyFailedWarned)
+                {
+                    _applyFailedWarned = true;
+                    MelonLogger.Warning("apply failed: " + ex.Message + " — further occurrences this session are silent");
+                }
+            }
+        }
+
+        // Best-effort vanilla restore (mod unload).
+        public static void RestoreDefaults()
+        {
+            _shutdown = true;   // the Update postfix may outlive this call
+            try
+            {
+                var m = _minimap;
+                if (m != null && ZoneDefaultRadius > 0f)
+                    m.RevealRadius = ZoneDefaultRadius;
+            }
+            catch { }
+            ShowHidden();
+        }
+
+        // Hide scope law: the leaf only — an ancestor is never hidden,
+        // because the ground-label canvas can share it and labels spawn at
+        // runtime (2026-09-10 incident). Ground labels and item tooltips are
+        // never valid scope, even if a future game update moves them under
+        // the Minimap GameObject itself.
+        //
+        // The hidden set is judged per incoming target, not against a single
+        // remembered object — a BLIND→BLIND zone change with overlapping
+        // minimap lifetimes hides the new zone's minimap too.
+        static void Hide(Minimap minimap)
+        {
+            try
+            {
+                var target = minimap.gameObject;
+
+                // Uncertainty must fail visible, never eat loot UI. Finding
+                // either type here means the game hierarchy was restructured;
+                // BLIND intentionally degrades to HARD behaviour.
+                if (HasProtectedItemUI(target, out string protectedType))
+                {
+                    if (!_protectedUiWarned)
+                    {
+                        _protectedUiWarned = true;
+                        MelonLogger.Warning($"BLIND — minimap not hidden: leaf {target.name} contains {protectedType}; degrading to HARD behaviour — further occurrences this session are silent");
+                    }
+                    return;
+                }
+
+                Dbg.Log($"BLIND target chosen: {target.name} — leaf Minimap GameObject; ancestors are never hidden");
+
+                foreach (var known in _hidden)
+                {
+                    try
+                    {
+                        if (known.GameObject == target)
+                        {
+                            ReassertHidden(known);
+                            return;                  // already tracked
+                        }
+                    }
+                    catch { }                        // collected entry — ignore
+                }
+
+                // council 2026-09-11 #3 — bound BLIND's per-frame scan across dead zones.
+                _hidden.RemoveAll(hidden =>
+                {
+                    try { return hidden.GameObject == null; }
+                    catch { return true; }
+                });
+
+                // Never adopt something the mod didn't hide: a game-parked
+                // (pooled, inactive) target would get force-activated by the
+                // next ShowHidden — a ghost minimap resurrected from the pool.
+                if (!target.activeSelf) return;
+
+                CanvasGroup group = null;
+                bool addedGroup = false;
+                HiddenTarget hidden = null;
+                bool entryAdded = false;
+                try
+                {
+                    group = target.GetComponent<CanvasGroup>();
+                    if (group == null)
+                    {
+                        group = target.AddComponent<CanvasGroup>();
+                        addedGroup = true;
+                    }
+
+                    hidden = new HiddenTarget
+                    {
+                        GameObject = target,
+                        CanvasGroup = group,
+                        AddedCanvasGroup = addedGroup,
+                        Alpha = group.alpha,
+                        BlocksRaycasts = group.blocksRaycasts,
+                        Interactable = group.interactable
+                    };
+                    // council 2026-09-11 #1 — register the snapshot before mutation.
+                    _hidden.Add(hidden);
+                    entryAdded = true;
+                    group.alpha = 0f;
+                    group.blocksRaycasts = false;
+                    group.interactable = false;
+                    Dbg.Log("BLIND — minimap hidden with CanvasGroup: " + target.name);
+                    return;
+                }
+                catch
+                {
+                    if (entryAdded)
+                    {
+                        try
+                        {
+                            group.alpha = hidden.Alpha;
+                            group.blocksRaycasts = hidden.BlocksRaycasts;
+                            group.interactable = hidden.Interactable;
+                        }
+                        catch
+                        {
+                            MelonLogger.Warning("minimap hide partially applied — will restore on leaving BLIND");
+                            return;
+                        }
+                        _hidden.Remove(hidden);
+                    }
+
+                    // CanvasGroup is the preferred path, but some IL2CPP
+                    // objects cannot take new components. Restore any partial
+                    // addition before using the deactivation fallback.
+                    try { if (addedGroup && group != null) UnityEngine.Object.Destroy(group); }
+                    catch { }
+                }
+
+                target.SetActive(false);
+                _hidden.Add(new HiddenTarget { GameObject = target });
+                Dbg.Log("BLIND — minimap hidden with SetActive fallback: " + target.name);
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning("minimap hide failed: " + ex.Message);
+            }
+        }
+
+        static bool HasProtectedItemUI(GameObject candidate, out string protectedType)
+        {
+            try
+            {
+                if (candidate.GetComponentInChildren<GroundItemLabel>(true) != null)
+                {
+                    protectedType = nameof(GroundItemLabel);
+                    return true;
+                }
+                if (candidate.GetComponentInChildren<UITooltipItem>(true) != null)
+                {
+                    protectedType = nameof(UITooltipItem);
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                protectedType = "uninspectable item UI (" + ex.Message + ")";
+                return true;
+            }
+
+            protectedType = null;
+            return false;
+        }
+
+        static bool IsHidden(Minimap minimap)
+        {
+            for (int i = 0; i < _hidden.Count; i++)
+            {
+                try
+                {
+                    var hidden = _hidden[i];
+                    var target = hidden.GameObject;
+                    if (target == null) continue;
+                    var minimapTransform = minimap.transform;
+                    if (minimapTransform != target.transform
+                        && !minimapTransform.IsChildOf(target.transform)) continue;
+
+                    if (hidden.CanvasGroup != null)
+                        return hidden.CanvasGroup.alpha == 0f
+                            && !hidden.CanvasGroup.blocksRaycasts
+                            && !hidden.CanvasGroup.interactable;
+                    return !target.activeSelf;
+                }
+                catch { }
+            }
+            return false;
+        }
+
+        static void ReassertHidden(HiddenTarget hidden)
+        {
+            if (hidden.CanvasGroup != null)
+            {
+                hidden.CanvasGroup.alpha = 0f;
+                hidden.CanvasGroup.blocksRaycasts = false;
+                hidden.CanvasGroup.interactable = false;
+            }
+            else if (hidden.GameObject.activeSelf)
+            {
+                hidden.GameObject.SetActive(false);
+            }
+        }
+
+        static void ShowHidden()
+        {
+            _restoring = true;   // our SetActive(true) can fire Awake on
+                                 // never-awoken children (Minimap has no
+                                 // OnEnable); the latch keeps our own restore
+                                 // from being mistaken for game activity
+            try
+            {
+                for (int i = _hidden.Count - 1; i >= 0; i--)
+                {
+                    try
+                    {
+                        var hidden = _hidden[i];
+                        var go = hidden.GameObject;
+                        if (go == null) continue;
+                        if (hidden.CanvasGroup != null)
+                        {
+                            hidden.CanvasGroup.alpha = hidden.Alpha;
+                            hidden.CanvasGroup.blocksRaycasts = hidden.BlocksRaycasts;
+                            hidden.CanvasGroup.interactable = hidden.Interactable;
+                            if (hidden.AddedCanvasGroup)
+                                UnityEngine.Object.Destroy(hidden.CanvasGroup);
+                            Dbg.Log("minimap CanvasGroup restored: " + go.name);
+                        }
+                        else if (!go.activeSelf)
+                        {
+                            go.SetActive(true);
+                            Dbg.Log("minimap restored: " + go.name);
+                        }
+                    }
+                    catch { }                        // dead object — nothing to restore
+                }
+                _hidden.Clear();
+            }
+            finally { _restoring = false; }
+        }
+    }
+}

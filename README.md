@@ -1,52 +1,65 @@
-# LastEpoch Mods
+# LastEpoch 模组整合项目
 
-## How to : 
-+ Installation Instruction can be found in [Discord](https://discord.gg/Kxfq8B82xj)
+本项目包含 LastEpoch_Hud，以及从 MedicK 上游仓库整合并汉化的 7 个独立模组。
 
+## MedicK 中文模组
 
-## Requirements :
-+ [Melon Loader](https://github.com/LavaGang/MelonLoader)
-  
-## Options :
-ItemDrop :
-- Gold Multiplier
-- Items multiplier
-- Experience Multiplier
-- Rarity
-- Implicits
-- Forgin Potencial
-- Affixes Values
-- Affixes Tiers
-- Unique Mods
-- Legendary Potencial
-- Weaver Will
-<br/><br/>
-Autoloot :
-- Gold
-- Keys
-- Unique & Set
-- Xp Tome
-- Materials
-- AutoStore Materials
-<br/><br/>
-Scene :
-- Density Multiplier
-- Experience Multiplier
-- Waypoint Unlock
-<br/><br/>
-Remove Prerequisites :
-- Remove Level
-- Remove Class
-- Remove subclass
-<br/><br/>
-Dungeons :
-- Objective Reveal
-- Enter Without Key
-<br/><br/>
-Monoliths :
-- Override max stability
-- Objective Reveal
-- Set ennemies defeat count on start
-- Complete Objective on start
-- No lost when die (untested)
-<br/><br/>
+功能、构建和安装说明见 [TERRIBLE_MODS_ZH.md](TERRIBLE_MODS_ZH.md)。
+
+## 安装说明
+
+安装与使用说明可加入 [Discord](https://discord.gg/Kxfq8B82xj) 获取。
+
+## 运行要求
+
+- [MelonLoader](https://github.com/LavaGang/MelonLoader)
+
+## 原有 HUD 功能
+
+### 物品掉落
+
+- 金币倍率
+- 物品数量倍率
+- 经验倍率
+- 稀有度
+- 固有词缀
+- 锻造潜能
+- 词缀数值
+- 词缀层级
+- 独特模组
+- 传奇潜能
+- 编织者意志
+
+### 自动拾取
+
+- 金币
+- 钥匙
+- 独特与套装物品
+- 经验书
+- 材料
+- 自动存放材料
+
+### 场景
+
+- 怪物密度倍率
+- 经验倍率
+- 传送点解锁
+
+### 移除需求
+
+- 移除等级需求
+- 移除职业需求
+- 移除子职业需求
+
+### 地下城
+
+- 显示目标
+- 无钥匙进入
+
+### 时间线
+
+- 覆盖最大稳定值
+- 显示目标
+- 开局设置击杀数量
+- 开局完成任务目标
+- 死亡不掉落稳定值（未充分测试）
